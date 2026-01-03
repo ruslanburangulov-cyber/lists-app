@@ -13,7 +13,6 @@
       --brand-teal:#00C5B5;
     }
     body { -webkit-tap-highlight-color: transparent; }
-
     .table-scroll { -webkit-overflow-scrolling: touch; }
     thead th { position: sticky; top: 0; z-index: 30; }
   </style>
@@ -129,7 +128,7 @@
 
 <script>
   // =======================
-  // НАСТРОЙКИ ТАБЛИЦЫ
+  // Google Sheet
   // =======================
   const SHEET_ID = "1CU56AZdWC9dCvkf_z6CWMtrgfuWRCG3HYx7hp79vI_c";
   const SHEET_NAME = "Для печати🖨️";
@@ -141,17 +140,16 @@
   };
 
   // =======================
-  // НАСТРОЙКИ ТРИГГЕРА (Apps Script Web App)
+  // Apps Script Web App (твой URL)
   // =======================
-  // 1) Вставь сюда URL веб-приложения Apps Script (после деплоя)
-  // Пример: "https://script.google.com/macros/s/AKfycb....../exec"
-  const TRIGGER_WEBAPP_URL = ""; // <-- заполни
+  const TRIGGER_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbUZ7wYhYZxJu8_QvJMq174aPZ6lPeHu5PY6jqfyGbE1QgxZv0KwFvgsDt_A2-wXUWA/exec";
 
-  // 2) Токен (любой секрет), чтобы никто посторонний не дергал обновление
-  const TRIGGER_TOKEN = ""; // <-- заполни (и такой же поставь в Apps Script)
+  // ⚠️ Токен должен совпадать с WEBAPP_TOKEN в Apps Script
+  // Если у тебя уже другой — поставь тут такой же.
+  const TRIGGER_TOKEN = "12345";
 
   // =======================
-  // STATE
+  // State
   // =======================
   let currentGroup = 1;
   let headers = [];
@@ -161,7 +159,6 @@
   let visibleCols = new Set();
   let draftVisibleCols = new Set();
 
-  // счетчик №метки по группам (чтобы показывать на вкладках)
   const labelCounts = { 1: 0, 2: 0, 3: 0 };
 
   // =======================
@@ -190,26 +187,8 @@
   const colsCounter = document.getElementById("colsCounter");
 
   // =======================
-  // HELPERS
+  // Helpers
   // =======================
-  function applyTabs(active){
-    const buttons = [tab1, tab2, tab3];
-    buttons.forEach((b,i)=>{
-      const group = i + 1;
-      const count = labelCounts[group] || 0;
-      const baseName = group === 1 ? "Группа 1" : (group === 2 ? "Группа 2" : "Ночь");
-      b.textContent = `${baseName} (${count})`;
-
-      if(group===active){
-        b.style.background = "var(--brand-blue)";
-        b.style.color = "white";
-      } else {
-        b.style.background = "";
-        b.style.color = "";
-      }
-    });
-  }
-
   function setStatus(text){
     statusEl.classList.remove("hidden");
     statusEl.textContent = text;
@@ -252,6 +231,33 @@
       .replaceAll("'", "&#039;");
   }
 
+  function computeLabelCount(){
+    if (labelIndex === -1) return 0;
+    let cnt = 0;
+    for (const r of rows) {
+      if (isIntLike(r[labelIndex])) cnt++;
+    }
+    return cnt;
+  }
+
+  function applyTabs(active){
+    const buttons = [tab1, tab2, tab3];
+    buttons.forEach((b,i)=>{
+      const group = i + 1;
+      const count = labelCounts[group] || 0;
+      const baseName = group === 1 ? "Группа 1" : (group === 2 ? "Группа 2" : "Ночь");
+      b.textContent = `${baseName} (${count})`;
+
+      if(group===active){
+        b.style.background = "var(--brand-blue)";
+        b.style.color = "white";
+      } else {
+        b.style.background = "";
+        b.style.color = "";
+      }
+    });
+  }
+
   function detectLabelIndex() {
     const target = norm("№метки");
     let idx = headers.findIndex(h => norm(h) === target);
@@ -291,21 +297,12 @@
     }
   }
 
-  function computeLabelCount(){
-    if (labelIndex === -1) return 0;
-    let cnt = 0;
-    for (const r of rows) {
-      if (isIntLike(r[labelIndex])) cnt++;
-    }
-    return cnt;
-  }
-
   // =======================
-  // Columns: per group storage
+  // Columns (per-group)
   // =======================
   function storageKey() {
     const signature = headers.map(h => norm(h)).join("|");
-    return `itsww_visibleCols_v2_group_${currentGroup}_${signature}`;
+    return `itsww_visibleCols_v3_group_${currentGroup}_${signature}`;
   }
 
   function loadVisibleColsFromStorage() {
@@ -322,10 +319,7 @@
 
       const set = new Set(arr.filter(n => Number.isInteger(n) && n >= 0 && n < colCount));
       if (labelIndex !== -1) set.add(labelIndex);
-      if (set.size === 0) {
-        if (labelIndex !== -1) set.add(labelIndex);
-        else { visibleCols = all; return; }
-      }
+      if (set.size === 0) set.add(labelIndex);
       visibleCols = set;
     } catch {
       visibleCols = all;
@@ -348,7 +342,7 @@
   }
 
   // =======================
-  // Data load
+  // Data
   // =======================
   async function loadGroup(n){
     currentGroup = n;
@@ -373,7 +367,6 @@
 
       detectLabelIndex();
 
-      // ✅ считаем количество №метки для текущей вкладки и обновляем надписи вкладок
       labelCounts[currentGroup] = computeLabelCount();
       applyTabs(currentGroup);
 
@@ -387,9 +380,6 @@
     }
   }
 
-  // =======================
-  // Filtering (only by №метки)
-  // =======================
   function renderFiltered(){
     const q = String(searchEl.value || "").trim();
     let filtered = rows;
@@ -401,9 +391,6 @@
     renderTable(filtered);
   }
 
-  // =======================
-  // Render
-  // =======================
   function renderTable(data){
     const colIdx = getVisibleColIndices();
 
@@ -510,15 +497,14 @@
   // =======================
   // Trigger call
   // =======================
-  async function runTriggerIfConfigured(){
+  async function runTrigger(){
     if (!TRIGGER_WEBAPP_URL) return { ok:true, skipped:true };
 
     try {
-      // POST: token в query (проще)
       const url = `${TRIGGER_WEBAPP_URL}?token=${encodeURIComponent(TRIGGER_TOKEN)}`;
       const res = await fetch(url, { method: "POST" });
       const txt = await res.text();
-      return { ok: res.ok, text: txt };
+      return { ok: res.ok && txt.includes("ok"), text: txt };
     } catch (e) {
       return { ok:false, text: String(e) };
     }
@@ -527,22 +513,14 @@
   async function refreshAll(){
     refreshBtn.disabled = true;
     refreshBtn.textContent = "…";
-
-    // 1) дергаем триггер (если задан)
     setStatus("Обновляю данные…");
-    const trig = await runTriggerIfConfigured();
 
-    // 2) грузим таблицу (всегда)
+    const trig = await runTrigger();
     await loadGroup(currentGroup);
 
-    // 3) статус
-    if (trig && trig.skipped) {
-      clearStatus();
-    } else if (trig && trig.ok) {
-      clearStatus();
-    } else {
-      setStatus("Триггер не сработал (проверь Web App URL/Token)");
-    }
+    if (trig && trig.skipped) clearStatus();
+    else if (trig && trig.ok) clearStatus();
+    else setStatus("Триггер не сработал (проверь токен / доступ web app)");
 
     refreshBtn.disabled = false;
     refreshBtn.textContent = "Обновить";
