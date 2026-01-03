@@ -19,7 +19,6 @@
 
 <body class="bg-slate-50 text-slate-900">
 
-<!-- HEADER -->
 <header class="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
   <div class="max-w-6xl mx-auto px-3 sm:px-4">
 
@@ -28,45 +27,24 @@
       <div class="text-lg font-bold" style="color:var(--brand-blue)">
         ITS Work Watch
       </div>
-
-      <nav class="hidden md:flex items-center gap-5 text-sm text-slate-600 ml-6">
-        <span>О продукте</span>
-        <span>Функционал</span>
-        <span>О нас</span>
-        <span>Контакты</span>
-      </nav>
-
       <div class="flex-1"></div>
-
-      <div class="hidden sm:flex items-center gap-4">
-        <span class="text-sm font-semibold">
-          <span class="inline-block h-2 w-2 rounded-full mr-2"
-                style="background:var(--brand-teal)"></span>
-          +7 499 653-94-99
-        </span>
-
-        <button class="px-4 h-9 rounded-full text-white text-sm font-semibold"
-                style="background:var(--brand-blue)">
-          Заказать звонок
-        </button>
-      </div>
-
       <div class="md:hidden text-xl">☰</div>
     </div>
 
     <!-- controls -->
     <div class="pb-3 space-y-2">
       <div class="grid grid-cols-3 gap-2">
-        <button id="tab1" class="tab-btn">Группа 1</button>
-        <button id="tab2" class="tab-btn">Группа 2</button>
-        <button id="tab3" class="tab-btn">Ночь</button>
+        <button id="tab1" class="h-10 rounded-xl text-sm font-semibold border">Группа 1</button>
+        <button id="tab2" class="h-10 rounded-xl text-sm font-semibold border">Группа 2</button>
+        <button id="tab3" class="h-10 rounded-xl text-sm font-semibold border">Ночь</button>
       </div>
 
       <div class="flex gap-2">
         <input
           id="search"
-          type="text"
-          placeholder="Поиск по таблице..."
+          type="number"
+          inputmode="numeric"
+          placeholder="Поиск по №метки..."
           class="flex-1 h-10 px-3 rounded-xl border border-slate-200 focus:ring-4 focus:ring-blue-100"
         />
         <button
@@ -78,15 +56,14 @@
       </div>
 
       <div class="text-xs text-slate-500">
-        Листай таблицу по горизонтали, чтобы видеть все колонки
+        Поиск работает только по колонке “№метки”. Таблицу можно листать по горизонтали.
       </div>
     </div>
   </div>
 </header>
 
-<!-- CONTENT -->
 <main class="max-w-6xl mx-auto px-3 sm:px-4 py-4">
-  <div id="status" class="hidden mb-3 text-sm"></div>
+  <div id="status" class="hidden mb-3 text-sm text-slate-600"></div>
 
   <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
     <div class="x-scroll overflow-x-auto">
@@ -102,15 +79,17 @@
   const SHEET_ID = "1CU56AZdWC9dCvkf_z6CWMtrgfuWRCG3HYx7hp79vI_c";
   const SHEET_NAME = "Для печати🖨️";
 
+  // ВАЖНО: используем твои исходные диапазоны с заголовками в первой строке диапазона
   const GROUPS = {
-    1: "D1:M150",
-    2: "R1:Z150",
-    3: "AE1:AM150"
+    1: "D2:M150",
+    2: "R2:Z150",
+    3: "AE2:AM150"
   };
 
   let currentGroup = 1;
   let headers = [];
   let rows = [];
+  let labelIndex = -1; // индекс колонки "№метки"
 
   const tab1 = document.getElementById("tab1");
   const tab2 = document.getElementById("tab2");
@@ -122,14 +101,13 @@
   const statusEl = document.getElementById("status");
 
   function applyTabs(active){
-    const base = "h-10 rounded-xl text-sm font-semibold border";
     [tab1, tab2, tab3].forEach((b,i)=>{
       if(i+1===active){
-        b.className = base + " text-white";
         b.style.background = "var(--brand-blue)";
+        b.style.color = "white";
       } else {
-        b.className = base + " bg-white text-slate-700 border-slate-200";
         b.style.background = "";
+        b.style.color = "";
       }
     });
   }
@@ -140,6 +118,28 @@
   }
   function clearStatus(){
     statusEl.classList.add("hidden");
+    statusEl.textContent = "";
+  }
+
+  function norm(s){
+    return String(s ?? "")
+      .toLowerCase()
+      .replaceAll(" ", "")
+      .replaceAll("\u00A0",""); // неразрывный пробел
+  }
+
+  function detectLabelIndex() {
+    const target = norm("№метки");
+    let idx = headers.findIndex(h => norm(h) === target);
+
+    // запасной вариант: если написано "№ метки" или похоже
+    if (idx === -1) {
+      idx = headers.findIndex(h => {
+        const nh = norm(h);
+        return nh.includes("метк") && nh.includes("№");
+      });
+    }
+    labelIndex = idx;
   }
 
   async function loadGroup(n){
@@ -149,9 +149,11 @@
     setStatus("Загрузка...");
 
     const range = GROUPS[n];
+
+    // headers=1 означает: первая строка диапазона — это заголовки колонок
     const url =
       `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?` +
-      `sheet=${encodeURIComponent(SHEET_NAME)}&range=${range}`;
+      `sheet=${encodeURIComponent(SHEET_NAME)}&range=${encodeURIComponent(range)}&headers=1`;
 
     try{
       const res = await fetch(url);
@@ -160,20 +162,31 @@
       const table = json.table;
 
       headers = table.cols.map(c => c.label || "");
-      rows = table.rows.map(r => r.c.map(c => c ? c.v : ""));
+      rows = table.rows.map(r => (r.c || []).map(c => (c ? c.v : "")));
 
+      detectLabelIndex();
       clearStatus();
+
+      if (labelIndex === -1) {
+        setStatus('Не нашёл колонку "№метки" (проверь точное название в заголовке).');
+      }
+
       renderFiltered();
-    } catch {
+    } catch (e) {
+      console.error(e);
       setStatus("Ошибка загрузки данных");
     }
   }
 
   function renderFiltered(){
-    const q = searchEl.value.toLowerCase();
-    const filtered = rows.filter(r =>
-      r.join(" ").toLowerCase().includes(q)
-    );
+    const q = String(searchEl.value || "").trim();
+    let filtered = rows;
+
+    // Ищем только по "№метки"
+    if (q && labelIndex !== -1) {
+      filtered = rows.filter(r => String(r[labelIndex] ?? "").trim().includes(q));
+    }
+
     renderTable(filtered);
   }
 
@@ -186,6 +199,17 @@
           </th>`).join("")}
       </tr>
     `;
+
+    if (!data.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="${Math.max(headers.length,1)}" class="px-3 py-10 text-center text-slate-500">
+            Нет данных
+          </td>
+        </tr>
+      `;
+      return;
+    }
 
     tbody.innerHTML = data.map((row,i)=>`
       <tr class="${i%2?'bg-slate-50':''}">
