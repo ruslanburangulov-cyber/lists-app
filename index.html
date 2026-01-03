@@ -21,8 +21,6 @@
 
 <header class="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
   <div class="max-w-6xl mx-auto px-3 sm:px-4">
-
-    <!-- top line -->
     <div class="h-14 flex items-center gap-3">
       <div class="text-lg font-bold" style="color:var(--brand-blue)">
         ITS Work Watch
@@ -31,7 +29,6 @@
       <div class="md:hidden text-xl">☰</div>
     </div>
 
-    <!-- controls -->
     <div class="pb-3 space-y-2">
       <div class="grid grid-cols-3 gap-2">
         <button id="tab1" class="h-10 rounded-xl text-sm font-semibold border">Группа 1</button>
@@ -58,6 +55,8 @@
       <div class="text-xs text-slate-500">
         Поиск работает только по колонке “№метки”. Таблицу можно листать по горизонтали.
       </div>
+
+      <div id="hint" class="hidden text-xs text-slate-500"></div>
     </div>
   </div>
 </header>
@@ -79,7 +78,7 @@
   const SHEET_ID = "1CU56AZdWC9dCvkf_z6CWMtrgfuWRCG3HYx7hp79vI_c";
   const SHEET_NAME = "Для печати🖨️";
 
-  // ВАЖНО: используем твои исходные диапазоны с заголовками в первой строке диапазона
+  // твои диапазоны
   const GROUPS = {
     1: "D2:M150",
     2: "R2:Z150",
@@ -89,7 +88,7 @@
   let currentGroup = 1;
   let headers = [];
   let rows = [];
-  let labelIndex = -1; // индекс колонки "№метки"
+  let labelIndex = -1;
 
   const tab1 = document.getElementById("tab1");
   const tab2 = document.getElementById("tab2");
@@ -99,6 +98,7 @@
   const thead = document.getElementById("thead");
   const tbody = document.getElementById("tbody");
   const statusEl = document.getElementById("status");
+  const hintEl = document.getElementById("hint");
 
   function applyTabs(active){
     [tab1, tab2, tab3].forEach((b,i)=>{
@@ -121,25 +121,78 @@
     statusEl.textContent = "";
   }
 
+  function setHint(text){
+    if (!text) { hintEl.classList.add("hidden"); hintEl.textContent = ""; return; }
+    hintEl.classList.remove("hidden");
+    hintEl.textContent = text;
+  }
+
   function norm(s){
     return String(s ?? "")
       .toLowerCase()
       .replaceAll(" ", "")
-      .replaceAll("\u00A0",""); // неразрывный пробел
+      .replaceAll("\u00A0","");
+  }
+
+  // превращаем значения в безопасный текст
+  // ВАЖНО: true/false показывать не будем (будут пустые)
+  function cellText(v){
+    if (v === true || v === false) return "";
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  function isIntLike(s){
+    if (s === null || s === undefined) return false;
+    const t = String(s).trim();
+    if (!t) return false;
+    // разрешим "003", "3", "99" и т.п.
+    return /^[0-9]+$/.test(t);
   }
 
   function detectLabelIndex() {
+    // 1) пробуем найти по заголовку
     const target = norm("№метки");
     let idx = headers.findIndex(h => norm(h) === target);
 
-    // запасной вариант: если написано "№ метки" или похоже
+    // 2) мягкий поиск по заголовку (если там "№ метки" и т.п.)
     if (idx === -1) {
       idx = headers.findIndex(h => {
         const nh = norm(h);
-        return nh.includes("метк") && nh.includes("№");
+        return nh.includes("метк") && (nh.includes("№") || nh.includes("no") || nh.includes("номер"));
       });
     }
+
+    // 3) если заголовка нет/не совпал — автоопределение по данным:
+    // выбираем колонку, где больше всего целых чисел (это обычно и есть №метки)
+    if (idx === -1 && rows.length) {
+      const colCount = headers.length || (rows[0] ? rows[0].length : 0);
+      const scores = new Array(colCount).fill(0);
+
+      for (const r of rows) {
+        for (let c = 0; c < colCount; c++) {
+          const v = cellText(r[c]);
+          if (isIntLike(v)) scores[c] += 1;
+        }
+      }
+
+      let best = -1, bestScore = 0;
+      for (let c = 0; c < scores.length; c++) {
+        if (scores[c] > bestScore) { bestScore = scores[c]; best = c; }
+      }
+
+      // порог: хотя бы несколько числовых значений, чтобы не ошибиться
+      if (best !== -1 && bestScore >= 3) idx = best;
+    }
+
     labelIndex = idx;
+
+    if (labelIndex !== -1) {
+      const headerName = headers[labelIndex] ? ` (“${headers[labelIndex]}”)` : "";
+      setHint(`Колонка №метки определена: ${labelIndex + 1}${headerName}`);
+    } else {
+      setHint('Не удалось определить колонку “№метки”.');
+    }
   }
 
   async function loadGroup(n){
@@ -149,8 +202,6 @@
     setStatus("Загрузка...");
 
     const range = GROUPS[n];
-
-    // headers=1 означает: первая строка диапазона — это заголовки колонок
     const url =
       `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?` +
       `sheet=${encodeURIComponent(SHEET_NAME)}&range=${encodeURIComponent(range)}&headers=1`;
@@ -161,16 +212,11 @@
       const json = JSON.parse(text.substring(47).slice(0,-2));
       const table = json.table;
 
-      headers = table.cols.map(c => c.label || "");
-      rows = table.rows.map(r => (r.c || []).map(c => (c ? c.v : "")));
+      headers = table.cols.map(c => cellText(c.label || ""));
+      rows = table.rows.map(r => (r.c || []).map(c => cellText(c ? c.v : "")));
 
       detectLabelIndex();
       clearStatus();
-
-      if (labelIndex === -1) {
-        setStatus('Не нашёл колонку "№метки" (проверь точное название в заголовке).');
-      }
-
       renderFiltered();
     } catch (e) {
       console.error(e);
@@ -182,12 +228,22 @@
     const q = String(searchEl.value || "").trim();
     let filtered = rows;
 
-    // Ищем только по "№метки"
+    // Поиск строго по колонке №метки
     if (q && labelIndex !== -1) {
-      filtered = rows.filter(r => String(r[labelIndex] ?? "").trim().includes(q));
+      filtered = rows.filter(r => String(r[labelIndex] ?? "").trim() === q);
+      // если хочешь частичное совпадение — поменяем на includes(q)
     }
 
     renderTable(filtered);
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   }
 
   function renderTable(data){
@@ -195,7 +251,7 @@
       <tr>
         ${headers.map(h=>`
           <th class="px-3 py-3 text-left font-semibold border-b whitespace-nowrap">
-            ${h}
+            ${escapeHtml(h || "—")}
           </th>`).join("")}
       </tr>
     `;
@@ -215,7 +271,7 @@
       <tr class="${i%2?'bg-slate-50':''}">
         ${headers.map((_,j)=>`
           <td class="px-3 py-3 whitespace-nowrap">
-            ${row[j] ?? ""}
+            ${escapeHtml(row[j] ?? "")}
           </td>`).join("")}
       </tr>
     `).join("");
