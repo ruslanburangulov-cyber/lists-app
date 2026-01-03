@@ -13,16 +13,18 @@
       --brand-teal:#00C5B5;
     }
     body { -webkit-tap-highlight-color: transparent; }
-    .x-scroll { -webkit-overflow-scrolling: touch; }
 
-    /* важно для sticky header: чтобы не "дергалось" */
-    thead th { position: sticky; top: 0; z-index: 20; }
+    /* Скролл именно у таблицы, чтобы sticky заголовки работали 100% */
+    .table-scroll { -webkit-overflow-scrolling: touch; }
+
+    /* sticky заголовков */
+    thead th { position: sticky; top: 0; z-index: 30; }
   </style>
 </head>
 
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-slate-50 text-slate-900 h-screen overflow-hidden">
 
-<header class="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
+<header class="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
   <div class="max-w-6xl mx-auto px-3 sm:px-4">
     <div class="h-14 flex items-center gap-3">
       <div class="text-lg font-bold" style="color:var(--brand-blue)">
@@ -63,7 +65,7 @@
       </div>
 
       <div class="text-xs text-slate-500">
-        Поиск работает только по колонке “№метки”. Таблицу можно листать по горизонтали.
+        Поиск работает только по колонке “№метки”. Колонки настраиваются отдельно для каждой вкладки.
       </div>
 
       <div id="hint" class="hidden text-xs text-slate-500"></div>
@@ -71,11 +73,12 @@
   </div>
 </header>
 
-<main class="max-w-6xl mx-auto px-3 sm:px-4 py-4">
-  <div id="status" class="hidden mb-3 text-sm text-slate-600"></div>
+<main class="max-w-6xl mx-auto px-3 sm:px-4 py-3 h-[calc(100vh-14rem)]">
+  <div id="status" class="hidden mb-2 text-sm text-slate-600"></div>
 
-  <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-    <div class="x-scroll overflow-x-auto">
+  <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden h-full">
+    <!-- ✅ Вертикальный скролл тут -->
+    <div id="tableScroll" class="table-scroll overflow-auto h-full">
       <table class="min-w-full text-sm">
         <thead id="thead" class="bg-slate-50"></thead>
         <tbody id="tbody" class="divide-y divide-slate-100"></tbody>
@@ -91,7 +94,7 @@
   <div class="relative mx-auto max-w-lg px-3 sm:px-4 mt-6">
     <div class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
-        <div class="font-semibold">Выбор колонок</div>
+        <div class="font-semibold">Выбор колонок (текущая группа)</div>
         <div class="flex-1"></div>
         <button id="closeModal" class="h-9 w-9 rounded-xl border border-slate-200 hover:bg-slate-50">✕</button>
       </div>
@@ -158,6 +161,7 @@
   const tbody = document.getElementById("tbody");
   const statusEl = document.getElementById("status");
   const hintEl = document.getElementById("hint");
+  const tableScroll = document.getElementById("tableScroll");
 
   const modal = document.getElementById("modal");
   const modalBackdrop = document.getElementById("modalBackdrop");
@@ -203,6 +207,7 @@
       .replaceAll("\u00A0","");
   }
 
+  // true/false скрываем
   function cellText(v){
     if (v === true || v === false) return "";
     if (v === null || v === undefined) return "";
@@ -262,8 +267,10 @@
     }
   }
 
+  // ✅ ключ хранения: отдельно по группе + по набору заголовков (чтобы точно не смешивалось)
   function storageKey() {
-    return `itsww_visibleCols_group_${currentGroup}`;
+    const signature = headers.map(h => norm(h)).join("|");
+    return `itsww_visibleCols_v2_group_${currentGroup}_${signature}`;
   }
 
   function loadVisibleColsFromStorage() {
@@ -311,6 +318,9 @@
     searchEl.value = "";
     setStatus("Загрузка...");
 
+    // при переключении группы — возвращаем скролл таблицы вверх
+    tableScroll.scrollTop = 0;
+
     const range = GROUPS[n];
     const url =
       `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?` +
@@ -350,7 +360,7 @@
   function renderTable(data){
     const colIdx = getVisibleColIndices();
 
-    // ✅ sticky headers: добавили sticky + top-0 + z-20 + непрозрачный фон
+    // ✅ sticky заголовок внутри tableScroll (вертикальный скролл у контейнера)
     thead.innerHTML = `
       <tr>
         ${colIdx.map(i=>`
